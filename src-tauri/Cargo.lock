@@ -4322,6 +4322,7 @@ version = "0.6.132"
 dependencies = [
  "base64 0.22.1",
  "flate2",
+ "gtk",
  "rusqlite",
  "serde",
  "serde_json",

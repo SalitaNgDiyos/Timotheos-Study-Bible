@@ -831,6 +831,29 @@ fn trace_write(line: &str) {
 }
 #[tauri::command]
 fn trace(line: String) { trace_write(&line.chars().take(400).collect::<String>()); }
+/// Linux: a broken icon theme (one that lists image-missing but cannot load it) makes GTK abort the whole program the moment the
+/// file chooser opens ("Gtk:ERROR ... ensure_surface_for_gicon ... Aborted"). Check the theme once at start; when it is broken,
+/// this program uses a sound one (Adwaita, breeze or hicolor) instead. The desktop's own setting is not touched.
+#[cfg(target_os = "linux")]
+fn guard_icon_theme() {
+    use gtk::prelude::*;
+    let (Some(theme), Some(settings)) = (gtk::IconTheme::default(), gtk::Settings::default()) else { return };
+    let broken = |t: &gtk::IconTheme| -> bool {
+        for n in ["image-missing", "folder", "text-x-generic", "document-open", "go-up"] {
+            if let Some(info) = t.lookup_icon(n, 16, gtk::IconLookupFlags::empty()) { if info.load_icon().is_err() { return true; } }
+        }
+        false
+    };
+    if !broken(&theme) { return; }
+    let was = settings.gtk_icon_theme_name().map(|s| s.to_string()).unwrap_or_default();
+    for cand in ["Adwaita", "breeze", "hicolor"] {
+        if !std::path::Path::new(&format!("/usr/share/icons/{}/index.theme", cand)).exists() { continue; }
+        settings.set_gtk_icon_theme_name(Some(cand));
+        if let Some(t2) = gtk::IconTheme::default() { if !broken(&t2) { trace_write(&format!("icon theme {} is broken; using {}", was, cand)); return; } }
+    }
+    settings.set_gtk_icon_theme_name(Some("hicolor"));
+    trace_write(&format!("icon theme {} is broken; using hicolor", was));
+}
 /// Developer Tools (F12 / Ctrl+Shift+I / View menu): opens or closes the web inspector of the window that asked
 #[tauri::command]
 fn toggle_devtools(window: tauri::WebviewWindow) {
@@ -1074,6 +1097,8 @@ pub fn run() {
         // closing the main window ends Timotheos, popped-out panel windows included (they come back at the next start)
         .on_window_event(|w, e| { if w.label() == "main" { if let tauri::WindowEvent::Destroyed = e { w.app_handle().exit(0); } } })
         .setup(|app| {
+            #[cfg(target_os = "linux")]
+            guard_icon_theme();
             // test hook: run a script in the page 3 seconds after the start
             if let Ok(path) = std::env::var("TIMOTHEOS_SCRIPT") {
                 if let Some(w) = app.get_webview_window("main") {
