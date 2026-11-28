@@ -109,10 +109,11 @@
     const set = curSet(); const mode = layoutMode();
     const ids = set ? effBibles(set).filter(bibleOf) : [];
     const base = set && ids.includes(set.base) ? set.base : ids[0];
-    const r = ref(); const bk = (state.nav || []).find(x => x.id === r.b);
+    const r = ref(); const bk = (state.nav || []).find(x => x.id === r.b) || (navList0 || []).find(x => x.id === r.b);
+    if (set && navKey !== ids.join('|')) loadNav().then(() => { if (navKey === ids.join('|')) drawBar(); });   // the names of books that only this set has
     // one row: the set, the verse picker (as in a Bible view), then the layout, Differences and Follow (0.6.128)
     bar.innerHTML = `<button type="button" class="parset" data-a="sets" title="Choose another parallel set, make a new one, or change this one (add, remove or order its Bibles)"><b>${esc(set ? setName(set) : 'No set yet')}</b>${ic('down', 13)}</button>${unsaved() ? `<button type="button" class="parsave" data-a="savedraft" title="Save these Bibles in the set “${esc(setName(set))}” (Auto save is off)" aria-label="Save">${ic('save', 15)}</button>` : ''}
-      ${set ? `<button type="button" class="navpill parpill" data-a="pick" title="Choose the book, chapter and verse${follow() ? ' (the Bible views go along: Follow is on)' : ''}"><span class="np-lbl">${esc(bk ? bk.name : '')} ${r.c || ''}:${r.v || 1}</span><span class="np-caret">▾</span></button>` : `<button type="button" class="primary" data-a="new">${ic('plus', 14)}Set up parallel Bibles</button>`}
+      ${set ? `<button type="button" class="navpill parpill" data-a="pick" title="Choose the book, chapter and verse${follow() ? ' (the Bible views go along: Follow is on)' : ''}"><span class="np-lbl">${esc(bk ? bk.name : '')} ${r.c || ''}:${r.v || 1}</span><span class="np-caret">▾</span></button><span class="navsteps parsteps" role="group" aria-label="Move through the Bible">${STEPS.map(([k, i, t]) => `<button type="button" class="dbtn navic" data-pn="${k}" title="${esc(t)}" aria-label="${esc(t)}">${ic(i, 14)}</button>`).join('')}</span>` : `<button type="button" class="primary" data-a="new">${ic('plus', 14)}Set up parallel Bibles</button>`}
       <span class="pargrow"></span>
       <span class="parseg" role="group" aria-label="Layout"><button type="button" data-a="cols" class="${mode === 'cols' ? 'on' : ''}" title="Bibles side by side">Columns</button><button type="button" data-a="stack" class="${mode === 'stack' ? 'on' : ''}" title="Each verse with every Bible under it">Stacked</button></span>
       <button type="button" data-a="more" class="parmore${menu && !menu.classList.contains('hidden') ? ' on' : ''}" aria-haspopup="true" aria-expanded="${menu && !menu.classList.contains('hidden') ? 'true' : 'false'}" title="More: Differences, Follow and the text tools" aria-label="More">⋯</button>`;
@@ -219,6 +220,7 @@
     }
   }
   async function onBar(e) {
+    const pn = e.target.closest('[data-pn]'); if (pn) { e.stopPropagation(); return stepAction(pn); }
     const b = e.target.closest('[data-a]');
     const chip = e.target.closest('[data-chip]');
     if (!b && chip) { const s = curSet(); if (s) { s.base = chip.dataset.chip; saveSets([...sets()]); drawBar(); if (S().parDiff) render(false, true); } return; }
@@ -472,6 +474,75 @@
     if (follow()) { if (typeof selectVerse === 'function' && !selectVerse(v, true)) go({ ...state.ref, v }); }
     else { const r = ref(); save({ parRef: { b: r.b, c: r.c, v } }); }
     mark(v);
+  }
+  /* ---------------------------------------------------------------- the step buttons beside the verse (as in a Bible view) */
+  const STEPS = [['prevBook', 'prevBook', 'Previous book'], ['prevChap', 'prevChap', 'Previous chapter'], ['back', 'back', 'Back to the previous passage'], ['prevVerse', 'up', 'Previous verse'],
+    ['nextVerse', 'down', 'Next verse'], ['fwd', 'forward', 'Forward to the next passage'], ['nextChap', 'nextChap', 'Next chapter'], ['nextBook', 'nextBook', 'Next book'], ['hist', 'history', 'Recent passages']];
+  const phist = { back: [], fwd: [] };   // this panel's own history while Follow is off
+  const same = (a, b) => a && b && a.b === b.b && a.c === b.c && a.v === b.v;
+  /* the books of the Bibles in this set (the Bible views' own list may be shorter: an NT beside an LXX) */
+  let navKey = '', navList0 = null;
+  async function loadNav() {
+    const ids = effBibles(curSet()).filter(bibleOf), key = ids.join('|');
+    if (key !== navKey || !navList0) { try { navList0 = ids.length ? await api.nav(ids) : []; navKey = key; } catch (e) { navList0 = null; } }
+    return navList0 || state.nav || [];
+  }
+  const nameOf = r => { const bk = (state.nav || []).find(x => x.id === r.b) || (navList0 || []).find(x => x.id === r.b); return `${bk ? bk.abbr || bk.name : r.b} ${r.c}:${r.v || 1}`; };
+  /** the books and chapters that the Bibles of this set have */
+  function books() {
+    const ids = effBibles(curSet()).filter(bibleOf), out = [];
+    for (const k of navList0 || state.nav || []) {
+      let ch = k.chapterList;
+      if (k.has && ids.some(id => k.has[id])) { const u = new Set(); for (const id of ids) for (const c of (k.has[id] || [])) u.add(c); ch = [...u].sort((x, y) => x - y); }   // a Bible that the navigation does not list yet adds nothing
+      if (ch && ch.length) out.push({ id: k.id, chapterList: ch });
+    }
+    return out;
+  }
+  const lastVerse = (b, c) => { let m = 0; for (const id of effBibles(curSet())) { const inf = state.infos && state.infos.get(id); const n = inf && inf.books && inf.books[b] ? (inf.books[b][c - 1] || 0) : 0; if (n > m) m = n; } return m || 1; };
+  /** where a step button leads from the place shown now */
+  function target(kind) {
+    const r = ref(), L = books(), i = L.findIndex(x => x.id === r.b); if (i < 0) return null;
+    const bk = L[i], j = bk.chapterList.indexOf(r.c);
+    const chap = d => { const k = j + d; if (k >= 0 && k < bk.chapterList.length) return { b: bk.id, c: bk.chapterList[k], v: 1 }; const o = L[i + d]; return o ? { b: o.id, c: d < 0 ? o.chapterList[o.chapterList.length - 1] : o.chapterList[0], v: 1 } : null; };
+    if (kind === 'prevBook' || kind === 'nextBook') { const o = L[i + (kind === 'nextBook' ? 1 : -1)]; return o ? { b: o.id, c: o.chapterList[0], v: 1 } : null; }
+    if (kind === 'prevChap') return chap(-1);
+    if (kind === 'nextChap') return chap(1);
+    const v = r.v || 1;
+    if (kind === 'nextVerse') return v < lastVerse(r.b, r.c) ? { b: r.b, c: r.c, v: v + 1 } : chap(1);
+    if (kind === 'prevVerse') { if (v > 1) return { b: r.b, c: r.c, v: v - 1 }; const p = chap(-1); return p ? { ...p, v: lastVerse(p.b, p.c) } : null; }
+    return null;
+  }
+  function moveTo(t, hist) {
+    if (!t) return;
+    if (follow()) { const c = ref(); if (typeof selectVerse === 'function' && t.b === c.b && t.c === c.c && selectVerse(t.v, true)) return; return go(t); }
+    const c = ref(); if (same(c, t)) return;
+    if (hist !== false) { phist.back.push(c); if (phist.back.length > 100) phist.back.shift(); phist.fwd = []; }
+    save({ parRef: { b: t.b, c: t.c, v: t.v || 1 } }); drawBar(); render(true);
+  }
+  function histGo(d) {
+    if (follow()) return typeof historyGo === 'function' && historyGo(d);
+    const from = d < 0 ? phist.back : phist.fwd, to = d < 0 ? phist.fwd : phist.back, r = from.pop(); if (!r) return;
+    to.push(ref()); save({ parRef: { ...r } }); drawBar(); render(true);
+  }
+  function histMenu(btn) {
+    document.querySelectorAll('.histmenu').forEach(m => m.remove());
+    const back = (follow() ? state.back : phist.back).slice(-20).reverse(), fwd = (follow() ? state.fwd : phist.fwd).slice(-10).reverse();
+    const m = document.createElement('div'); m.className = 'menu bvmenu histmenu';
+    m.innerHTML = '<div class="mh">Passage History</div>' + fwd.map((r, k) => `<button type="button" data-hdir="fwd" data-hidx="${k}">↪ <b>${esc(nameOf(r))}</b></button>`).join('')
+      + `<button type="button" class="on" disabled>● <b>${esc(nameOf(ref()))}</b> <span class="small">(current)</span></button>`
+      + (back.length ? '<div class="mh small">Earlier Passages</div>' + back.map((r, k) => `<button type="button" data-hdir="back" data-hidx="${k}">↩ ${esc(nameOf(r))}</button>`).join('') : (fwd.length ? '' : '<div class="small" style="padding:6px 12px">No earlier passages in history yet.</div>'));
+    document.body.appendChild(m);
+    const r = btn.getBoundingClientRect(); m.style.left = Math.max(8, Math.min(r.left, innerWidth - 260)) + 'px'; m.style.top = r.bottom + 4 + 'px';
+    const off = e => { if (!m.contains(e.target)) { m.remove(); document.removeEventListener('mousedown', off, true); } };
+    setTimeout(() => document.addEventListener('mousedown', off, true), 0);
+    m.onclick = e => { const bt = e.target.closest('button[data-hdir]'); if (!bt) return; m.remove(); document.removeEventListener('mousedown', off, true); for (let k = 0; k <= +bt.dataset.hidx; k++) histGo(bt.dataset.hdir === 'back' ? -1 : 1); };
+  }
+  async function stepAction(btn) {
+    const k = btn.dataset.pn; await loadNav();
+    if (k === 'back') return histGo(-1);
+    if (k === 'fwd') return histGo(1);
+    if (k === 'hist') return histMenu(btn);
+    moveTo(target(k));
   }
   /** drag a Bible label (a column title, or the name before a verse in Stacked) onto another one to move it there */
   let dragEnd = 0;
