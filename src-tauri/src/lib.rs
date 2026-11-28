@@ -821,6 +821,26 @@ fn net_progress(dest: Option<String>) -> Value {
     match j { Some(j) => json!({ "done": j.done.load(Ordering::Relaxed), "total": j.total.load(Ordering::Relaxed) }), None => json!({ "done": 0, "total": 0 }) }
 }
 /// stop the download with this `dest`, or all of them
+/// A small log of what the app was doing last (the file chooser, a Rust panic): %TEMP%\timotheos-trace.log, so a crash can be traced
+fn trace_write(line: &str) {
+    use std::io::Write;
+    let p = std::env::temp_dir().join("timotheos-trace.log");
+    if fs::metadata(&p).map(|m| m.len() > 200_000).unwrap_or(false) { let _ = fs::remove_file(&p); }
+    let t = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
+    if let Ok(mut f) = fs::OpenOptions::new().create(true).append(true).open(&p) { let _ = writeln!(f, "{} {}", t, line); }
+}
+#[tauri::command]
+fn trace(line: String) { trace_write(&line.chars().take(400).collect::<String>()); }
+/// Developer Tools (F12 / Ctrl+Shift+I / View menu): opens or closes the web inspector of the window that asked
+#[tauri::command]
+fn toggle_devtools(window: tauri::WebviewWindow) {
+    #[cfg(desktop)]
+    {
+        if window.is_devtools_open() { window.close_devtools(); } else { window.open_devtools(); }
+    }
+    #[cfg(not(desktop))]
+    { let _ = window; }
+}
 #[tauri::command]
 fn net_stop(dest: Option<String>) {
     if let Ok(m) = net_jobs().lock() {
@@ -1026,6 +1046,8 @@ async fn oauth_auth(auth_url_template: String, timeout_secs: Option<u64>) -> Res
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    let default_hook = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| { trace_write(&format!("PANIC {}", info)); default_hook(info); }));
     // Linux: WebKitGTK's GPU compositing shows soft, blurred text while scrolling. Software compositing keeps it sharp.
     // Set before any web view exists; a value the user already set (even "0") is respected.
     #[cfg(target_os = "linux")]
@@ -1063,7 +1085,7 @@ pub fn run() {
             }
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![host_info, test_report, read_text_file, quit, write_b64, net_text, net_get, net_progress, net_stop, net_sha256, update_run, net_request, oauth_auth])
+        .invoke_handler(tauri::generate_handler![host_info, test_report, read_text_file, quit, write_b64, net_text, net_get, net_progress, net_stop, toggle_devtools, trace, net_sha256, update_run, net_request, oauth_auth])
         .run(tauri::generate_context!())
         .expect("error while running Timotheos");
 }

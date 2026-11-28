@@ -1653,10 +1653,14 @@ async function getModules() {
     <ol>${steps}</ol>
     <p class="small"><b>Files Timotheos reads:</b> theWord <code>.ont</code> <code>.ot</code> <code>.nt</code> <code>.twm</code> <code>.twzip</code>; e-Sword <code>.bblx</code> <code>.cmtx</code> <code>.dctx</code> <code>.lexx</code> <code>.topx</code> <code>.refx</code> <code>.devx</code> (and the older <code>…i</code> forms); and a <code>.zip</code> that holds any of these. A module that comes as a program (<code>.exe</code>) cannot be imported, and locked or encrypted modules are not opened.</p>
     <p class="small">A site may ask you to make a free account before you can download. Timotheos is not connected with these sites, and each module stays under its publisher's own terms.</p></div>`;
-  const r = await TimotheosModules.modal('Where to get modules', html, [{ label: 'Close', value: null }, { label: 'Download modules…', value: 'download' }, { label: 'Import modules…', value: 'import', primary: true }], true);
+  const pr = TimotheosModules.modal('Where to get modules', html, [{ label: 'Close', value: null }, { label: 'Download modules…', value: 'download' }, { label: 'Import modules…', value: 'import', primary: true }], true);
+  // Import works from the click itself, as the toolbar's Import does (the file chooser is opened by the click, with this window still
+  // under it; closing the window first and opening the chooser a moment later made some systems hang or refuse the chooser)
+  const ib = [...document.querySelectorAll('#modalBtns button')].find(x => x.classList.contains('primary'));
+  if (ib) ib.addEventListener('click', e => { e.stopImmediatePropagation(); e.preventDefault(); try { runCommand('import'); } catch (err) { console.error('[getModules]', err); } }, true);
+  const r = await pr;
   // the file chooser opens only after this window is gone from the screen (a native dialog over a closing window can take the app down on some desktops)
   const later = fn => setTimeout(() => { try { fn(); } catch (e) { console.error('[getModules]', e); } }, 250);
-  if (r === 'import') later(() => runCommand('import'));
   if (r === 'download') later(() => runCommand('downloadModules'));
 }
 const GET_MODS_LINK = '<a class="link" data-href="cmd:getModules">Where to get modules</a>';

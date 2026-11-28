@@ -169,7 +169,10 @@ async function hostOp(op, a) {
         }
         return { canceled: false, filePaths: out };
       }
-      const r = await dlgOpen({ title: o.title, multiple: props.includes('multiSelections'), directory: props.includes('openDirectory'), filters: (o.filters || []).filter(f => !(f.extensions || []).includes('*')) });
+      const tr = t => { try { invoke('trace', { line: t }).catch(() => {}); } catch (e) { /* no log */ } };
+      tr('file chooser: opening (' + (o.title || '') + ')');
+      let r; try { r = await dlgOpen({ title: o.title, multiple: props.includes('multiSelections'), directory: props.includes('openDirectory'), filters: (o.filters || []).filter(f => !(f.extensions || []).includes('*')) }); } catch (e) { tr('file chooser: error ' + (e && e.message || e)); throw e; }
+      tr('file chooser: closed, ' + (!r ? 'nothing chosen' : (Array.isArray(r) ? r.length : 1) + ' chosen'));
       if (!r) return { canceled: true, filePaths: [] };
       const picked = (Array.isArray(r) ? r : [r]).map(fwd);
       if (props.includes('multiSelections') && picked.length) {
@@ -200,7 +203,7 @@ async function hostOp(op, a) {
     case 'front': try { await win.unminimize(); await win.show(); await win.setFocus(); } catch (e) { /* ignore */ } return true;
     case 'quit': return invoke('quit');
     case 'print': window.print(); return true;
-    case 'devtools': return true;
+    case 'devtools': try { await invoke('toggle_devtools'); } catch (e) { console.error('[devtools]', e); } return true;
     case 'guide': return openGuide(a[0]);
     case 'panelsWindow': return openPanelsWindow();
   }
